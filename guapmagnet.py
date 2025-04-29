@@ -1,53 +1,32 @@
-# magnet.py
-
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel
-import requests
+import joblib
+import numpy as np
 
-app = FastAPI()
+# Load model
+model = joblib.load("guapmagnet_model.joblib")
 
-# Hugging Face API
-HF_TOKEN = "hf_bEabSREPJUFVfkQq1CcrylmrxWaenzQbC"  # Your real token
-HF_MODEL_URL = "https://api-inference.huggingface.co/models/tiiuae/falcon-7b-instruct"  # Elite Model
-
-headers = {
-    "Authorization": f"Bearer {HF_TOKEN}"
-}
-
-class TickData(BaseModel):
+# Input format
+class PredictInput(BaseModel):
     bid: float
     ask: float
-    spread: float
-    volume: float
-    time: str
 
-@app.get("/")
-async def root():
-    return {"status": "GuapMagnet server online"}
+# Start FastAPI app
+app = FastAPI()
 
-@app.post("/predict/")
-async def predict(tick: TickData):
-    payload = {
-        "inputs": {
-            "bid": tick.bid,
-            "ask": tick.ask,
-            "spread": tick.spread,
-            "volume": tick.volume,
-            "timestamp": tick.time
-        }
+@app.post("/predict")
+def predict(input: PredictInput):
+    features = np.array([[input.bid, input.ask]])
+    prediction = model.predict(features)[0]
+    confidence = model.predict_proba(features)[0].max()
+
+    label_map = {1: "BUY", 0: "SELL", 2: "HOLD"}
+    signal = label_map.get(prediction, "UNKNOWN")
+
+    return {
+        "signal": signal,
+        "confidence": round(float(confidence), 4)
     }
-    response = requests.post(HF_MODEL_URL, headers=headers, json=payload)
 
-    if response.status_code != 200:
-        raise HTTPException(status_code=500, detail="Model Inference Failed")
-
-    output = response.json()
-
-    try:
-        signal = output.get("signal", "HOLD")
-        confidence = output.get("confidence", 0.5)
-    except Exception:
-        signal = "HOLD"
-        confidence = 0.5
 
     return {"signal": signal, "confidence": confidence}
